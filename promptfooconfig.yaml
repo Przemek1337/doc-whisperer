@@ -1,0 +1,268 @@
+# Konfiguracja testów dla RAG z LangChain + OpenAI
+description: "Testy systemu RAG do wyszukiwania informacji w dokumentach"
+
+# Wczytanie zmiennych środowiskowych
+env:
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+# Konfiguracja providerów
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      apiKey: ${OPENAI_API_KEY}  # Bez cudzysłowów
+      temperature: 0.1
+      max_tokens: 1000
+
+# Prompty systemowe
+prompts:
+  - "Jesteś asystentem AI, który pomaga użytkownikom znajdować informacje w dokumentach. Odpowiadaj na podstawie dostarczonego kontekstu. Jeśli nie znajdziesz odpowiedzi w kontekście, powiedz że nie ma takiej informacji w dokumencie.\n\nKontekst: {{context}}\nPytanie: {{query}}\n\nOdpowiedź:"
+
+# Testy
+tests:
+  # === TESTY PODSTAWOWEJ FUNKCJONALNOŚCI ===
+  - description: "RAG znajduje podstawowe informacje w dokumencie"
+    vars:
+      query: "Jaka jest główna teza tego dokumentu?"
+      context: "Dokument opisuje strategię rozwoju firmy na lata 2024-2026. Główną tezą jest digitalizacja procesów biznesowych."
+    assert:
+      - type: contains
+        value: "digitalizacja"
+      - type: contains
+        value: "strategia"
+      - type: not-contains
+        value: "nie wiem"
+
+  - description: "RAG znajduje konkretne daty i liczby"
+    vars:
+      query: "Jaki jest planowany budżet na marketing?"
+      context: "Budżet marketingowy na 2024 rok wynosi 2,5 miliona złotych. Planujemy zwiększenie o 15% w następnym roku."
+    assert:
+      - type: contains
+        value: "2,5 miliona"
+      - type: regex
+        value: '\d+[,.]?\d*.*milion.*zł|złotych'
+      - type: contains
+        value: "2024"
+
+  # === TESTY NA HALLUCYNACJE ===
+  - description: "RAG nie wymyśla informacji które nie istnieją"
+    vars:
+      query: "Jaki jest budżet na 2030 rok?"
+      context: "Budżet marketingowy na 2024 rok wynosi 2,5 miliona złotych. Planujemy zwiększenie o 15% w 2025 roku."
+    assert:
+      - type: contains
+        value: "nie ma|brak|nie znalazłem|nie występuje"
+      - type: not-contains
+        value: "2030.*milion"
+
+  - description: "RAG przyznaje się do braku informacji"
+    vars:
+      query: "Kto jest dyrektorem IT?"
+      context: "Firma zatrudnia 150 pracowników w różnych działach. Dział sprzedaży kieruje Jan Kowalski."
+    assert:
+      - type: contains
+        value: "nie ma|brak|nie znalazłem|nie wspomina"
+      - type: not-contains
+        value: "dyrektor IT"
+
+  # === TESTY DŁUGICH VS KRÓTKICH ZAPYTAŃ ===
+  - description: "Obsługa krótkiego zapytania"
+    vars:
+      query: "CEO"
+      context: "Prezes zarządu (CEO) Adam Nowak prowadzi firmę od 2020 roku. Ma 15 lat doświadczenia w branży."
+    assert:
+      - type: contains
+        value: "Adam Nowak"
+      - type: not-empty
+
+  - description: "Obsługa szczegółowego zapytania"
+    vars:
+      query: "Kto jest prezesem firmy i jakie ma doświadczenie zawodowe?"
+      context: "Prezes zarządu (CEO) Adam Nowak prowadzi firmę od 2020 roku. Ma 15 lat doświadczenia w branży technologicznej."
+    assert:
+      - type: contains
+        value: "Adam Nowak"
+      - type: contains
+        value: "15 lat"
+      - type: contains
+        value: "doświadczenie"
+
+  # === TESTY JAKOŚCI ODPOWIEDZI ===
+  - description: "Odpowiedź zawiera kompletne informacje"
+    vars:
+      query: "Jakie są główne cele strategiczne firmy?"
+      context: "Nasze cele strategiczne to: 1) Zwiększenie udziału w rynku o 25%, 2) Digitalizacja wszystkich procesów, 3) Ekspansja na rynki europejskie, 4) Redukcja kosztów o 10%."
+    assert:
+      - type: llm-rubric
+        value: "Odpowiedź zawiera co najmniej 3 konkretne cele strategiczne z kontekstu"
+      - type: contains
+        value: "25%"
+      - type: contains
+        value: "digitalizacja"
+      - type: length
+        min: 80
+
+  - description: "RAG potrafi podsumować długi tekst"
+    vars:
+      query: "Podsumuj główne punkty raportu"
+      context: "Raport kwartalny pokazuje wzrost przychodów o 12%. Koszty operacyjne spadły o 8%. Zatrudniliśmy 25 nowych pracowników. Uruchomiliśmy 3 nowe produkty. Klienci oceniają nas na 4.2/5."
+    assert:
+      - type: contains
+        value: "wzrost"
+      - type: contains
+        value: "12%"
+      - type: llm-rubric
+        value: "Podsumowanie zawiera najważniejsze metryki biznesowe"
+
+  # === TESTY ANALIZY DANYCH LICZBOWYCH ===
+  - description: "Analiza danych finansowych"
+    vars:
+      query: "Jakie były wyniki sprzedaży w Q1?"
+      context: "Wyniki Q1 2024: Sprzedaż 5.2M zł (+18% YoY), EBITDA 1.1M zł, marża 21%. Q2 prognoza: 5.8M zł."
+    assert:
+      - type: contains
+        value: "5.2M"
+      - type: contains
+        value: "18%"
+      - type: regex
+        value: 'Q1|pierwszy kwartał'
+
+  - description: "Porównanie danych między okresami"
+    vars:
+      query: "Który kwartał był lepszy pod względem przychodów?"
+      context: "Q1 2024: przychody 5.2M zł. Q2 2024: przychody 4.8M zł. Q3 2024: przychody 6.1M zł."
+    assert:
+      - type: contains
+        value: "Q3"
+      - type: contains
+        value: "6.1M"
+      - type: llm-rubric
+        value: "Odpowiedź poprawnie identyfikuje Q3 jako najlepszy kwartał"
+
+  # === TESTY EDGE CASES ===
+  - description: "Zapytanie całkowicie poza kontekstem dokumentu"
+    vars:
+      query: "Jaka jest dzisiaj pogoda w Warszawie?"
+      context: "Firma ABC została założona w 1995 roku. Specjalizujemy się w oprogramowaniu dla banków."
+    assert:
+      - type: contains
+        value: "nie mogę|poza zakresem|brak informacji|nie ma takiej informacji"
+      - type: not-contains
+        value: "słonecznie|deszcz|temperatura"
+
+  - description: "Bardzo krótki kontekst"
+    vars:
+      query: "Opisz działalność firmy"
+      context: "Firma ABC."
+    assert:
+      - type: contains
+        value: "zbyt mało|niewystarczające|brak szczegółów|więcej informacji"
+
+  - description: "Puste zapytanie"
+    vars:
+      query: ""
+      context: "Dokument zawiera strategię firmy na 2024 rok."
+    assert:
+      - type: contains
+        value: "proszę|podaj|pytanie|zapytania"
+
+  # === TESTY KONSYSTENCJI ===
+  - description: "Ta sama informacja - wariant 1"
+    vars:
+      query: "Ile pracowników zatrudnia firma?"
+      context: "Nasze zespoły liczą łącznie 245 specjalistów w 5 działach."
+    assert:
+      - type: contains
+        value: "245"
+
+  - description: "Ta sama informacja - wariant 2"
+    vars:
+      query: "Jaka jest liczba zatrudnionych w firmie?"
+      context: "Nasze zespoły liczą łącznie 245 specjalistów w 5 działach."
+    assert:
+      - type: contains
+        value: "245"
+
+  # === TESTY JĘZYKOWE (POLSKIE ZNAKI) ===
+  - description: "Obsługa polskich znaków diakrytycznych"
+    vars:
+      query: "Jakie są główne założenia strategii?"
+      context: "Główne założenia strategii obejmują: współpracę z kluczowymi partnerami, wdrożenie nowoczesnych rozwiązań oraz zwiększenie efektywności."
+    assert:
+      - type: contains
+        value: "współpracę"
+      - type: contains
+        value: "wdrożenie"
+      - type: not-contains
+        value: "encoding|utf-8"
+
+  - description: "Wyszukiwanie nazw własnych z polskimi znakami"
+    vars:
+      query: "Kto prowadzi dział w Krakowie?"
+      context: "Oddział w Krakowie prowadzi Paweł Wójcik, specjalista z 12-letnim doświadczeniem."
+    assert:
+      - type: contains
+        value: "Paweł Wójcik"
+      - type: contains
+        value: "Krakowie"
+
+  # === TESTY RÓŻNYCH TYPÓW PYTAŃ ===
+  - description: "Pytanie typu tak/nie"
+    vars:
+      query: "Czy firma planuje ekspansję zagraniczną?"
+      context: "W 2025 roku planujemy otworzyć biura w Berlinie i Pradze. To część naszej strategii ekspansji na rynki europejskie."
+    assert:
+      - type: contains
+        value: "tak|planuje|tak, firma"
+      - type: contains
+        value: "Berlin|Praga"
+
+  - description: "Pytanie o przyczynę/powód"
+    vars:
+      query: "Dlaczego firma zdecydowała się na fuzję?"
+      context: "Decyzja o fuzji wynikała z potrzeby zwiększenia skali działalności i redukcji kosztów operacyjnych o 15%."
+    assert:
+      - type: contains
+        value: "zwiększenia skali|redukcji kosztów"
+      - type: contains
+        value: "15%"
+
+  - description: "Pytanie o definicję/wyjaśnienie"
+    vars:
+      query: "Co oznacza skrót KPI w tym kontekście?"
+      context: "Monitorujemy kluczowe wskaźniki wydajności (KPI) takie jak: czas odpowiedzi, zadowolenie klientów, i konwersja sprzedaży."
+    assert:
+      - type: contains
+        value: "kluczowe wskaźniki wydajności"
+      - type: contains
+        value: "czas odpowiedzi|zadowolenie|konwersja"
+
+  # === TESTY WYDAJNOŚCI I JAKOŚCI ===
+  - description: "Test długości odpowiedzi - nie za krótka"
+    vars:
+      query: "Opisz strategię marketingową firmy"
+      context: "Nasza strategia marketingowa opiera się na 4 filarach: marketing cyfrowy (40% budżetu), wydarzenia branżowe (25%), PR i media relations (20%), marketing bezpośredni (15%). Główne kanały to LinkedIn, Google Ads i targi branżowe."
+    assert:
+      - type: length
+        min: 100
+        max: 500
+      - type: contains
+        value: "4 filary|filarach"
+
+  - description: "Test precyzji - unikanie informacji z innych części"
+    vars:
+      query: "Jaki jest budżet działu HR?"
+      context: "Budżet marketingu: 2M zł. Budżet IT: 1.5M zł. Budżet HR: 800K zł. Budżet operations: 1.2M zł."
+    assert:
+      - type: contains
+        value: "800K|800 000"
+      - type: not-contains
+        value: "2M|1.5M|1.2M"
+
+# Konfiguracja outputu
+outputPath: './promptfoo-results'
+
+# Dodatkowe opcje
+evaluateOptions:
+  maxConcurrency: 4
+  delay: 1000  # 1 sekunda między requestami
