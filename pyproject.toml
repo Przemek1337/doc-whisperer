@@ -1,0 +1,27 @@
+[project]
+name = "doc-whisperer"
+version = "0.1.0"
+description = "Streamlit app for processing PDFs and DOCX using LangChain, OpenAI and local embeddings"
+authors = [
+    { name = "Przemek", email = "7przemekk@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "langgraph",
+    "langchain",
+    "langchain-core",
+    "langchain-openai",
+    "langchain-community",
+    "openai",
+    "python-dotenv",
+    "PyPDF2",
+    "python-docx",
+    "chromadb",
+    "tiktoken",
+    "streamlit"
+]
+
+[tool.uv]
+python = "3.10"
